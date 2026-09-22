@@ -39,5 +39,5 @@ jobs:
           allowed_non_write_users: "*"
           prompt: "/triage-issue"
           claude_args: |
-            --max-turns 20
-            --allowedTools "Read,Glob,Grep,Write,Bash(./scripts/gh-read.sh:*),Bash(./scripts/edit-issue-labels.sh:*),Bash(./scripts/upsert-triage-comment.sh:*)"
+            --max-turns 40
+            --allowedTools "Read,Glob,Grep,Write,TodoWrite,Bash(./scripts/gh-read.sh:*),Bash(./scripts/edit-issue-labels.sh:*),Bash(./scripts/upsert-triage-comment.sh:*)"

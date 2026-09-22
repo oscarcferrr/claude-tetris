@@ -1,0 +1,29 @@
+[
+  { "name": "bug", "color": "d73a4a", "description": "Something isn't working" },
+  { "name": "enhancement", "color": "a2eeef", "description": "New feature or request" },
+  { "name": "documentation", "color": "0075ca", "description": "Improvements or additions to documentation" },
+  { "name": "question", "color": "d876e3", "description": "Further information is requested" },
+  { "name": "duplicate", "color": "cfd3d7", "description": "This issue or pull request already exists" },
+  { "name": "accessibility", "color": "f143ab", "description": "Barrier affecting people with disabilities" },
+  { "name": "refactor", "color": "c5def5", "description": "Code change that neither fixes a bug nor adds a feature" },
+  { "name": "performance", "color": "fbca04", "description": "Slowness, jank, or excessive CPU/GPU/memory usage" },
+
+  { "name": "area:gameplay", "color": "1d76db", "description": "Core rules: pieces, rotation/wall kicks, collision, locking, line clearing" },
+  { "name": "area:rendering", "color": "1d76db", "description": "Canvas drawing: board/grid, current piece, ghost piece, next-piece preview" },
+  { "name": "area:input", "color": "1d76db", "description": "Keyboard controls, key bindings, pause/resume" },
+  { "name": "area:scoring", "color": "1d76db", "description": "Score, lines, level progression, drop interval/speed" },
+  { "name": "area:ui", "color": "1d76db", "description": "HTML/CSS layout, styling, on-screen text outside the canvas" },
+  { "name": "area:ci", "color": "1d76db", "description": "GitHub Actions workflows, automation, repo tooling" },
+
+  { "name": "priority:high", "color": "b60205", "description": "Breaks core gameplay or blocks users; should be fixed soon" },
+  { "name": "priority:medium", "color": "d93f0b", "description": "Noticeable but has a workaround or limited impact" },
+  { "name": "priority:low", "color": "0e8a16", "description": "Minor, cosmetic, or nice-to-have" },
+
+  { "name": "effort:small", "color": "c2e0c6", "description": "Roughly a few lines / one function, low risk" },
+  { "name": "effort:medium", "color": "fef2c0", "description": "Touches a few functions or one subsystem" },
+  { "name": "effort:large", "color": "f9d0c4", "description": "Cross-cutting change or new subsystem" },
+
+  { "name": "needs-info", "color": "e4e669", "description": "Not enough information to diagnose; author follow-up needed" },
+  { "name": "triaged", "color": "5319e7", "description": "Automatically analyzed by Claude issue triage" },
+  { "name": "skip-triage", "color": "ededed", "description": "Excludes this issue from automatic Claude triage" }
+]

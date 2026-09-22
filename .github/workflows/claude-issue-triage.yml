@@ -1,0 +1,43 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+concurrency:
+  group: claude-triage-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    if: >-
+      github.event.issue.state == 'open' &&
+      github.event.sender.type != 'Bot' &&
+      !contains(github.event.issue.labels.*.name, 'skip-triage')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Sync label taxonomy
+        run: ./scripts/sync-labels.sh .github/labels.json
+
+      - name: Run Claude issue triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_non_write_users: "*"
+          prompt: "/triage-issue"
+          claude_args: |
+            --max-turns 20
+            --allowedTools "Read,Glob,Grep,Write,Bash(./scripts/gh-read.sh:*),Bash(./scripts/edit-issue-labels.sh:*),Bash(./scripts/upsert-triage-comment.sh:*)"

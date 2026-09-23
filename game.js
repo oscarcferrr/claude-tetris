@@ -31,8 +31,8 @@ const HOLE = 99;        // celda del agujero: sólida y cuenta como llena, pero 
 // WILD SÍ persiste en `board` (comodín eliminable al contacto).
 // Los códigos POWER_BASE+n en cambio NUNCA llegan a `board`: sólo existen en el
 // `shape` de la pieza en vuelo; merge() los detecta, dispara el efecto y escribe
-// en su lugar el color base de la pieza. Así ni clearLines() ni el render tienen
-// que saber nada de ellos.
+// en su lugar el color base de la pieza. Así ni collapseFullRows() ni el
+// render tienen que saber nada de ellos.
 const WILD = 98;         // celda comodín (tinte)
 const POWER_BASE = 100;  // celdas de power-up: POWER_BASE + índice en POWERUPS
 
@@ -56,7 +56,9 @@ const PIECES = [
   [[12]],                                     // SINGLE - 1x1 (recompensa)
 ];
 
-const LINE_SCORES = [0, 100, 300, 500, 800];
+// Nota: la tabla de puntos por líneas (antes LINE_SCORES aquí) vive ahora en
+// scoring.js como Scoring.BASE_SCORES, junto con el resto de la lógica de
+// puntuación (combo, T-Spin, Back-to-Back, Perfect Clear).
 
 // ---- Power-ups: configuración ----
 const POWERUP_LINE_INTERVAL = 5; // cada cuántas líneas se encola un power-up
@@ -85,6 +87,8 @@ const nextCtx = nextCanvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const linesEl = document.getElementById('lines');
 const levelEl = document.getElementById('level');
+const comboEl = document.getElementById('combo');
+const b2bEl = document.getElementById('b2b');
 const powerupNextEl = document.getElementById('powerup-next');
 const powerupStatusEl = document.getElementById('powerup-status');
 const overlay = document.getElementById('overlay');
@@ -99,6 +103,13 @@ let powerupPending;     // hay un power-up esperando a entrar en `next`
 let nextPowerUpAtLines; // umbral de líneas al que se encola el siguiente power-up
 let freezeRemaining;    // ms restantes del efecto Congelar (0 = sin congelar)
 let powerStatus;        // texto del último efecto disparado, para el panel
+
+// Estado de combo/T-Spin/Back-to-Back (todo se resetea en init()). La lógica
+// de cálculo vive en scoring.js; aquí sólo se guarda el estado entre jugadas.
+let combo;       // nº de líneas limpiadas consecutivas (0 = sin cadena)
+let b2bChain;    // nº de jugadas "difíciles" (Tetris/T-Spin) encadenadas (0 = sin cadena)
+let lastAction;  // última acción del jugador sobre la pieza actual: 'spawn'|'move'|'rotate'|'drop'
+let lastKick;    // desplazamiento de columnas del último wall kick aceptado (para detectTSpin)
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -115,7 +126,7 @@ function randomType() {
 
 function makePiece(type) {
   const shape = PIECES[type].map(row => [...row]);
-  return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+  return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0, rot: 0 };
 }
 
 function randomPiece() {
@@ -278,6 +289,21 @@ function collide(shape, ox, oy) {
   return false;
 }
 
+// Consulta de una única celda para Scoring.detectTSpin(): una celda cuenta
+// como "ocupada" si tiene un bloque fijo, o si cae fuera de los límites
+// laterales o inferiores del tablero (el borde también sostiene un T-Spin).
+// Por encima del tablero (ny < 0) NO cuenta como ocupada.
+function isOccupied(x, y) {
+  if (x < 0 || x >= COLS || y >= ROWS) return true;
+  if (y < 0) return false;
+  return !!board[y][x];
+}
+
+// true si no queda ningún bloque en el tablero (para el bonus Perfect Clear).
+function isBoardEmpty() {
+  return board.every(row => row.every(v => v === 0));
+}
+
 function rotateCW(shape) {
   const rows = shape.length, cols = shape[0].length;
   const result = Array.from({ length: cols }, () => new Array(rows).fill(0));
@@ -294,6 +320,9 @@ function tryRotate() {
     if (!collide(rotated, current.x + kick, current.y)) {
       current.shape = rotated;
       current.x += kick;
+      current.rot = (current.rot + 1) % 4;
+      lastAction = 'rotate';
+      lastKick = kick;
       return;
     }
   }
@@ -322,7 +351,11 @@ function merge() {
   return { triggers, lockedCells };
 }
 
-function clearLines() {
+// Sólo colapsa las filas completas (splice/unshift) y devuelve cuántas se
+// limpiaron. No toca puntuación ni estado de combo/B2B — eso es trabajo de
+// resolveLock(), que llama a Scoring (scoring.js) para mantener el cálculo
+// desacoplado del "motor" de filas.
+function collapseFullRows() {
   let cleared = 0;
   for (let r = ROWS - 1; r >= 0; r--) {
     if (board[r].every(v => v !== 0)) {
@@ -332,11 +365,28 @@ function clearLines() {
       r++;
     }
   }
+  return cleared;
+}
+
+// Aplica el resultado de fijar una pieza: puntuación (vía Scoring.evaluateLock,
+// que ya incluye combo/T-Spin/B2B/Perfect Clear), nivel, cola de power-ups y
+// eventos de feedback. Se llama siempre desde lockPiece(), incluso cuando
+// `cleared === 0`, porque una jugada sin líneas rompe el combo igualmente.
+function resolveLock(cleared, spin) {
+  const boardEmpty = cleared > 0 && isBoardEmpty();
+  const prevCombo = combo;
+  const result = Scoring.evaluateLock({ lines: cleared, level, spin, combo, b2b: b2bChain, boardEmpty });
+
+  score += result.points;
+  combo = result.combo;
+  b2bChain = result.b2b;
+
   if (cleared) {
     lines += cleared;
-    score += (LINE_SCORES[cleared] || 0) * level;
+    const prevLevel = level;
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    if (level > prevLevel) GameEvents.emit('levelUp', { level });
     if (cleared >= 4) rewardPending = true;
     // Al cruzar cada múltiplo de POWERUP_LINE_INTERVAL se encola un power-up.
     // `while` cubre el caso de que `cleared` salte de golpe varios umbrales.
@@ -344,8 +394,16 @@ function clearLines() {
       nextPowerUpAtLines += POWERUP_LINE_INTERVAL;
       if (Math.random() < POWERUP_CHANCE) powerupPending = true;
     }
-    updateHUD();
   }
+
+  if (spin) GameEvents.emit('tspin', { kind: spin, lines: cleared });
+  if (cleared || spin) GameEvents.emit('lineClear', { lines: cleared, result });
+  if (result.combo > 0) GameEvents.emit('combo', { combo: result.combo, comboMult: result.comboMult });
+  else if (prevCombo > 0) GameEvents.emit('comboBreak', { previousCombo: prevCombo });
+  if (result.b2bApplied) GameEvents.emit('b2b', { b2b: result.b2b });
+  if (result.perfectClear) GameEvents.emit('perfectClear', { lines: cleared, bonus: result.breakdown.perfectBonus });
+
+  updateHUD();
 }
 
 function ghostY() {
@@ -372,17 +430,32 @@ function softDrop() {
 }
 
 function lockPiece() {
-  freezeRemaining = 0;                       // la congelación muere con la pieza que la disfrutó
+  freezeRemaining = 0; // la congelación muere con la pieza que la disfrutó
+
+  // Detectar T-Spin ANTES de bakear la pieza: necesita current.x/y/rot tal
+  // como quedaron al fijarla, y sólo cuenta si la última acción fue rotar.
+  const spin = Scoring.detectTSpin({
+    type: current.type, rot: current.rot, x: current.x, y: current.y,
+    kick: lastKick, lastAction, isOccupied,
+  });
+
   const { triggers, lockedCells } = merge(); // 1. bakea la pieza (sin códigos POWER_*)
+  GameEvents.emit('lock', { x: current.x, y: current.y });
   resolveWildContacts(lockedCells);          // 2. comodines tocados por esta pieza
   for (const t of triggers)                  // 3. dispara los efectos de power-up
     powerStatus = POWERUPS[t.kind].apply(t.x, t.y);
-  clearLines();                              // 4. líneas completadas (incluye las de los efectos)
+  // 4. líneas completadas (incluye las que generan los efectos de power-up:
+  //    una bomba o un rayo que completa una fila cuenta para el combo y para
+  //    el Perfect Clear igual que si la hubiera limpiado la propia pieza).
+  const cleared = collapseFullRows();
+  resolveLock(cleared, spin);                // 5. puntuación (combo/T-Spin/B2B/Perfect Clear) + eventos
   spawn();
 }
 
 function spawn() {
   current = next;
+  lastAction = 'spawn'; // una pieza recién aparecida no cuenta como "rotada" para T-Spin
+  lastKick = 0;
   // Prioridad de la cola: la recompensa de Tetris nunca se pisa con un
   // power-up pendiente; el power-up espera a la siguiente pieza si hace falta.
   if (rewardPending) {
@@ -405,6 +478,8 @@ function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  if (comboEl) comboEl.textContent = combo > 0 ? `x${Math.min(1 + combo, Scoring.COMBO_MAX_MULT)}` : '—';
+  if (b2bEl) b2bEl.textContent = b2bChain > 1 ? `x${b2bChain}` : '—';
   updatePowerHUD();
 }
 
@@ -497,11 +572,14 @@ function endGame() {
   gameOver = true;
   freezeRemaining = 0;
   powerStatus = '';
+  combo = 0;
+  b2bChain = 0;
   cancelAnimationFrame(animId);
   animId = null;
   overlayTitle.textContent = 'GAME OVER';
   overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
   overlay.classList.remove('hidden');
+  GameEvents.emit('gameOver', { score });
 }
 
 function togglePause() {
@@ -565,6 +643,10 @@ function init() {
   nextPowerUpAtLines = POWERUP_LINE_INTERVAL;
   freezeRemaining = 0;
   powerStatus = '';
+  combo = 0;
+  b2bChain = 0;
+  lastAction = 'spawn';
+  lastKick = 0;
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();
@@ -581,20 +663,22 @@ document.addEventListener('keydown', e => {
   if (paused || gameOver) return;
   switch (e.code) {
     case 'ArrowLeft':
-      if (!collide(current.shape, current.x - 1, current.y)) current.x--;
+      if (!collide(current.shape, current.x - 1, current.y)) { current.x--; lastAction = 'move'; }
       break;
     case 'ArrowRight':
-      if (!collide(current.shape, current.x + 1, current.y)) current.x++;
+      if (!collide(current.shape, current.x + 1, current.y)) { current.x++; lastAction = 'move'; }
       break;
     case 'ArrowDown':
+      lastAction = 'drop';
       softDrop();
       break;
     case 'ArrowUp':
     case 'KeyX':
-      tryRotate();
+      tryRotate(); // tryRotate() ya marca lastAction = 'rotate' si la rotación se acepta
       break;
     case 'Space':
       e.preventDefault();
+      lastAction = 'drop';
       hardDrop();
       break;
   }

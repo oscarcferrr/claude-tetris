@@ -14,11 +14,22 @@ const COLORS = [
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
   '#b0bec5', // NUT - gris metálico
+  '#f06292', // PLUS - rosa
+  '#4db6ac', // PENTO_U - verde azulado
+  '#7986cb', // PENTO_Y - índigo
+  '#fff176', // SINGLE - dorado (recompensa)
 ];
 
-const NUT = 8;        // tipo de pieza: tuerca (reto, 3x3 con agujero)
-const HOLE = 9;        // celda del agujero: sólida y cuenta como llena, pero no se dibuja
-const NUT_CHANCE = 0.1; // probabilidad de que salga la tuerca en vez de un tetromino clásico
+const NUT = 8;          // tipo de pieza: tuerca (reto, 3x3 con agujero)
+const PLUS = 9;         // pentominó +
+const PENTO_U = 10;     // pentominó U
+const PENTO_Y = 11;     // pentominó Y
+const SINGLE = 12;      // pieza 1x1 (recompensa tras un Tetris)
+const HOLE = 99;        // celda del agujero: sólida y cuenta como llena, pero no se dibuja
+
+// índice = tipo de pieza; peso 0 = nunca sale por sorteo (ej. SINGLE, sólo como recompensa)
+const PIECE_WEIGHTS = [0, 10, 10, 10, 10, 10, 10, 10, 6, 7, 7, 7, 0];
+const TOTAL_WEIGHT = PIECE_WEIGHTS.reduce((a, b) => a + b, 0);
 
 const PIECES = [
   null,
@@ -29,7 +40,11 @@ const PIECES = [
   [[5,5,0],[0,5,5],[0,0,0]],                  // Z
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
-  [[8,8,8],[8,9,8],[8,8,8]],                  // NUT - tuerca con agujero central
+  [[8,8,8],[8,HOLE,8],[8,8,8]],               // NUT - tuerca con agujero central
+  [[0,9,0],[9,9,9],[0,9,0]],                  // PLUS - pentominó +
+  [[10,0,10],[10,10,10],[0,0,0]],             // PENTO_U - pentominó U
+  [[0,11,0,0],[11,11,0,0],[0,11,0,0],[0,11,0,0]], // PENTO_Y - pentominó Y
+  [[12]],                                     // SINGLE - 1x1 (recompensa)
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
@@ -47,16 +62,28 @@ const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, rewardPending;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
 }
 
-function randomPiece() {
-  const type = Math.random() < NUT_CHANCE ? NUT : Math.floor(Math.random() * 7) + 1;
+function randomType() {
+  let r = Math.random() * TOTAL_WEIGHT;
+  for (let t = 1; t < PIECE_WEIGHTS.length; t++) {
+    r -= PIECE_WEIGHTS[t];
+    if (r < 0) return t;
+  }
+  return 1;
+}
+
+function makePiece(type) {
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+}
+
+function randomPiece() {
+  return makePiece(randomType());
 }
 
 function collide(shape, ox, oy) {
@@ -115,6 +142,7 @@ function clearLines() {
     score += (LINE_SCORES[cleared] || 0) * level;
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    if (cleared >= 4) rewardPending = true;
     updateHUD();
   }
 }
@@ -150,7 +178,8 @@ function lockPiece() {
 
 function spawn() {
   current = next;
-  next = randomPiece();
+  next = rewardPending ? makePiece(SINGLE) : randomPiece();
+  rewardPending = false;
   if (collide(current.shape, current.x, current.y)) {
     endGame();
   }
@@ -224,8 +253,17 @@ function drawNext() {
   const NB = 30;
   nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
   const shape = next.shape;
-  const offX = Math.floor((4 - shape[0].length) / 2);
-  const offY = Math.floor((4 - shape.length) / 2);
+  let minR = shape.length, maxR = -1, minC = shape[0].length, maxC = -1;
+  for (let r = 0; r < shape.length; r++)
+    for (let c = 0; c < shape[r].length; c++)
+      if (shape[r][c]) {
+        if (r < minR) minR = r;
+        if (r > maxR) maxR = r;
+        if (c < minC) minC = c;
+        if (c > maxC) maxC = c;
+      }
+  const offX = Math.floor((4 - (maxC - minC + 1)) / 2) - minC;
+  const offY = Math.floor((4 - (maxR - minR + 1)) / 2) - minR;
   for (let r = 0; r < shape.length; r++)
     for (let c = 0; c < shape[r].length; c++)
       drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
@@ -289,6 +327,7 @@ function init() {
   level = 1;
   paused = false;
   gameOver = false;
+  rewardPending = false;
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();

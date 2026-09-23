@@ -13,7 +13,12 @@ const COLORS = [
   '#e57373', // Z - red
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
+  '#b0bec5', // NUT - gris metálico
 ];
+
+const NUT = 8;        // tipo de pieza: tuerca (reto, 3x3 con agujero)
+const HOLE = 9;        // celda del agujero: sólida y cuenta como llena, pero no se dibuja
+const NUT_CHANCE = 0.1; // probabilidad de que salga la tuerca en vez de un tetromino clásico
 
 const PIECES = [
   null,
@@ -24,6 +29,7 @@ const PIECES = [
   [[5,5,0],[0,5,5],[0,0,0]],                  // Z
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
+  [[8,8,8],[8,9,8],[8,8,8]],                  // NUT - tuerca con agujero central
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
@@ -48,7 +54,7 @@ function createBoard() {
 }
 
 function randomPiece() {
-  const type = Math.floor(Math.random() * 7) + 1;
+  const type = Math.random() < NUT_CHANCE ? NUT : Math.floor(Math.random() * 7) + 1;
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
 }
@@ -158,7 +164,7 @@ function updateHUD() {
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
-  if (!colorIndex) return;
+  if (!colorIndex || colorIndex === HOLE) return; // el agujero de la tuerca no se dibuja
   const color = COLORS[colorIndex];
   context.globalAlpha = alpha ?? 1;
   context.fillStyle = color;

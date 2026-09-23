@@ -27,6 +27,15 @@ const PENTO_Y = 11;     // pentominó Y
 const SINGLE = 12;      // pieza 1x1 (recompensa tras un Tetris)
 const HOLE = 99;        // celda del agujero: sólida y cuenta como llena, pero no se dibuja
 
+// ---- Power-ups: códigos de celda ----
+// WILD SÍ persiste en `board` (comodín eliminable al contacto).
+// Los códigos POWER_BASE+n en cambio NUNCA llegan a `board`: sólo existen en el
+// `shape` de la pieza en vuelo; merge() los detecta, dispara el efecto y escribe
+// en su lugar el color base de la pieza. Así ni clearLines() ni el render tienen
+// que saber nada de ellos.
+const WILD = 98;         // celda comodín (tinte)
+const POWER_BASE = 100;  // celdas de power-up: POWER_BASE + índice en POWERUPS
+
 // índice = tipo de pieza; peso 0 = nunca sale por sorteo (ej. SINGLE, sólo como recompensa)
 const PIECE_WEIGHTS = [0, 10, 10, 10, 10, 10, 10, 10, 6, 7, 7, 7, 0];
 const TOTAL_WEIGHT = PIECE_WEIGHTS.reduce((a, b) => a + b, 0);
@@ -49,6 +58,26 @@ const PIECES = [
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
+// ---- Power-ups: configuración ----
+const POWERUP_LINE_INTERVAL = 5; // cada cuántas líneas se encola un power-up
+const POWERUP_CHANCE = 1;        // probabilidad al cruzar el umbral (1 = garantizado)
+const FREEZE_MS = 5000;          // duración del efecto Congelar
+const BOMB_RADIUS = 1;           // 1 → área 3×3 centrada en el impacto
+const WILD_COLOR = '#ffffff';    // color de dibujo de los bloques comodín (tinte)
+const POWER_SCORES = { cell: 10, ray: 25, wild: 15 }; // puntos por celda destruida (×level)
+
+// Registro de efectos. Cada `apply` actúa sobre el tablero global y devuelve un
+// texto corto para el HUD. El índice de cada entrada es el que viaja codificado
+// en la celda de la pieza como POWER_BASE + índice.
+const POWERUPS = [
+  { id: 'bomb',    label: 'Bomba',    glyph: '💣', color: '#ff7043', apply: (x, y) => applyBomb(x, y) },
+  { id: 'rayRow',  label: 'Rayo ↔',   glyph: '↔',  color: '#4fc3f7', apply: (x, y) => applyRay(x, y, 'row') },
+  { id: 'rayCol',  label: 'Rayo ↕',   glyph: '↕',  color: '#4fc3f7', apply: (x, y) => applyRay(x, y, 'col') },
+  { id: 'tint',    label: 'Tinte',    glyph: '🎨', color: '#ce93d8', apply: () => applyTint() },
+  { id: 'gravity', label: 'Gravedad', glyph: '⬇',  color: '#a5d6a7', apply: () => applyGravity() },
+  { id: 'freeze',  label: 'Congelar', glyph: '❄',  color: '#80deea', apply: () => applyFreeze() },
+];
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
@@ -56,6 +85,8 @@ const nextCtx = nextCanvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const linesEl = document.getElementById('lines');
 const levelEl = document.getElementById('level');
+const powerupNextEl = document.getElementById('powerup-next');
+const powerupStatusEl = document.getElementById('powerup-status');
 const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
@@ -63,6 +94,11 @@ const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, rewardPending;
+// Estado de power-ups (todo se resetea en init())
+let powerupPending;     // hay un power-up esperando a entrar en `next`
+let nextPowerUpAtLines; // umbral de líneas al que se encola el siguiente power-up
+let freezeRemaining;    // ms restantes del efecto Congelar (0 = sin congelar)
+let powerStatus;        // texto del último efecto disparado, para el panel
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -84,6 +120,149 @@ function makePiece(type) {
 
 function randomPiece() {
   return makePiece(randomType());
+}
+
+/* ================= Power-ups ================= */
+
+// Sortea un tetromino base (tipos 1–7, sin mezclar con NUT/pentominós) y le
+// incrusta una celda de power-up en un bloque relleno al azar.
+function makePowerPiece() {
+  let type;
+  do { type = randomType(); } while (type < 1 || type > 7);
+  const piece = makePiece(type);
+  const kind = Math.floor(Math.random() * POWERUPS.length);
+  const filled = [];
+  for (let r = 0; r < piece.shape.length; r++)
+    for (let c = 0; c < piece.shape[r].length; c++)
+      if (piece.shape[r][c]) filled.push([r, c]);
+  const [pr, pc] = filled[Math.floor(Math.random() * filled.length)];
+  piece.shape[pr][pc] = POWER_BASE + kind;
+  piece.power = kind; // usado por el panel NEXT/POWER-UP
+  return piece;
+}
+
+// Color de dibujo de una celda del tablero o de una pieza, incluyendo los
+// códigos especiales (power-up en vuelo, comodín). drawBlock() delega aquí.
+function cellColor(v) {
+  if (v >= POWER_BASE) return POWERUPS[v - POWER_BASE].color;
+  if (v === WILD) return WILD_COLOR;
+  return COLORS[v];
+}
+
+// Glifo a superponer sobre una celda especial, o null si no lleva ninguno.
+function cellGlyph(v) {
+  if (v >= POWER_BASE) return POWERUPS[v - POWER_BASE].glyph;
+  if (v === WILD) return '★';
+  return null;
+}
+
+function inBounds(x, y) {
+  return x >= 0 && x < COLS && y >= 0 && y < ROWS;
+}
+
+// Bomba: destruye el área (2·BOMB_RADIUS+1)² centrada en el impacto.
+function applyBomb(cx, cy) {
+  let destroyed = 0;
+  for (let y = cy - BOMB_RADIUS; y <= cy + BOMB_RADIUS; y++) {
+    for (let x = cx - BOMB_RADIUS; x <= cx + BOMB_RADIUS; x++) {
+      if (!inBounds(x, y)) continue;
+      if (board[y][x]) { board[y][x] = 0; destroyed++; }
+    }
+  }
+  score += destroyed * POWER_SCORES.cell * level;
+  return `Bomba: ${destroyed} bloques`;
+}
+
+// Rayo: limpia toda la fila o toda la columna del impacto.
+function applyRay(x, y, orientation) {
+  let destroyed = 0;
+  if (orientation === 'row') {
+    for (let c = 0; c < COLS; c++) if (board[y][c]) destroyed++;
+    board[y].fill(0);
+  } else {
+    for (let r = 0; r < ROWS; r++) if (board[r][x]) { board[r][x] = 0; destroyed++; }
+  }
+  score += destroyed * POWER_SCORES.ray * level;
+  return orientation === 'row' ? `Rayo: fila ${y + 1}` : `Rayo: columna ${x + 1}`;
+}
+
+// Tinte: el color más frecuente del tablero (excluyendo huecos, HOLE y WILD ya
+// existentes) se convierte en bloques comodín.
+function applyTint() {
+  const counts = {};
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++) {
+      const v = board[r][c];
+      if (v === 0 || v === HOLE || v === WILD) continue;
+      counts[v] = (counts[v] || 0) + 1;
+    }
+  const colors = Object.keys(counts);
+  if (colors.length === 0) return 'Tinte: sin efecto';
+  let best = [], bestCount = 0;
+  for (const c of colors) {
+    const n = counts[c];
+    if (n > bestCount) { best = [c]; bestCount = n; }
+    else if (n === bestCount) best.push(c);
+  }
+  const target = Number(best[Math.floor(Math.random() * best.length)]);
+  let converted = 0;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (board[r][c] === target) { board[r][c] = WILD; converted++; }
+  return `Tinte: ${converted} bloques comodín`;
+}
+
+// Gravedad: compacta cada columna hacia abajo, cerrando los huecos.
+function applyGravity() {
+  for (let c = 0; c < COLS; c++) {
+    const values = [];
+    for (let r = 0; r < ROWS; r++) if (board[r][c]) values.push(board[r][c]);
+    const pad = ROWS - values.length;
+    for (let r = 0; r < ROWS; r++) board[r][c] = r < pad ? 0 : values[r - pad];
+  }
+  return 'Gravedad aplicada';
+}
+
+// Congelar: detiene la caída automática durante FREEZE_MS (ver loop()).
+function applyFreeze() {
+  freezeRemaining = FREEZE_MS;
+  return 'Congelar: 5s sin caída';
+}
+
+// Al fijar una pieza, cualquier bloque comodín (WILD) que toque ortogonalmente
+// alguna de las celdas recién fijadas desaparece, junto con todos los WILD
+// conectados a él (flood-fill 4-direccional).
+function resolveWildContacts(lockedCells) {
+  const visited = Array.from({ length: ROWS }, () => new Array(COLS).fill(false));
+  let destroyed = 0;
+  const seeds = [];
+  for (const [x, y] of lockedCells) {
+    const neighbors = [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
+    for (const [nx, ny] of neighbors)
+      if (inBounds(nx, ny) && board[ny][nx] === WILD && !visited[ny][nx])
+        seeds.push([nx, ny]);
+  }
+  for (const seed of seeds) {
+    const stack = [seed];
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      if (!inBounds(x, y) || visited[y][x] || board[y][x] !== WILD) continue;
+      visited[y][x] = true;
+      board[y][x] = 0;
+      destroyed++;
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+  }
+  if (destroyed) score += destroyed * POWER_SCORES.wild * level;
+}
+
+function updatePowerHUD() {
+  if (!powerupNextEl) return; // panel aún no montado (no debería pasar)
+  const upcoming = next && next.power !== undefined ? POWERUPS[next.power] : null;
+  powerupNextEl.textContent = upcoming ? `${upcoming.glyph} ${upcoming.label}` : '—';
+  powerupStatusEl.textContent = freezeRemaining > 0
+    ? `❄ Congelado ${(freezeRemaining / 1000).toFixed(1)}s`
+    : (powerStatus || '');
 }
 
 function collide(shape, ox, oy) {
@@ -120,11 +299,27 @@ function tryRotate() {
   }
 }
 
+// Bakea la pieza actual en `board`. Las celdas de power-up (>= POWER_BASE)
+// nunca llegan a `board`: se registran en `triggers` y se escriben con el
+// color base de la pieza (current.type), para que el tablero sólo contenga
+// colores normales, HOLE y WILD.
 function merge() {
+  const triggers = [];
+  const lockedCells = [];
   for (let r = 0; r < current.shape.length; r++)
-    for (let c = 0; c < current.shape[r].length; c++)
-      if (current.shape[r][c])
-        board[current.y + r][current.x + c] = current.shape[r][c];
+    for (let c = 0; c < current.shape[r].length; c++) {
+      const v = current.shape[r][c];
+      if (!v) continue;
+      const x = current.x + c, y = current.y + r;
+      if (v >= POWER_BASE) {
+        triggers.push({ kind: v - POWER_BASE, x, y });
+        board[y][x] = current.type;
+      } else {
+        board[y][x] = v;
+      }
+      lockedCells.push([x, y]);
+    }
+  return { triggers, lockedCells };
 }
 
 function clearLines() {
@@ -143,6 +338,12 @@ function clearLines() {
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
     if (cleared >= 4) rewardPending = true;
+    // Al cruzar cada múltiplo de POWERUP_LINE_INTERVAL se encola un power-up.
+    // `while` cubre el caso de que `cleared` salte de golpe varios umbrales.
+    while (lines >= nextPowerUpAtLines) {
+      nextPowerUpAtLines += POWERUP_LINE_INTERVAL;
+      if (Math.random() < POWERUP_CHANCE) powerupPending = true;
+    }
     updateHUD();
   }
 }
@@ -171,36 +372,58 @@ function softDrop() {
 }
 
 function lockPiece() {
-  merge();
-  clearLines();
+  freezeRemaining = 0;                       // la congelación muere con la pieza que la disfrutó
+  const { triggers, lockedCells } = merge(); // 1. bakea la pieza (sin códigos POWER_*)
+  resolveWildContacts(lockedCells);          // 2. comodines tocados por esta pieza
+  for (const t of triggers)                  // 3. dispara los efectos de power-up
+    powerStatus = POWERUPS[t.kind].apply(t.x, t.y);
+  clearLines();                              // 4. líneas completadas (incluye las de los efectos)
   spawn();
 }
 
 function spawn() {
   current = next;
-  next = rewardPending ? makePiece(SINGLE) : randomPiece();
-  rewardPending = false;
+  // Prioridad de la cola: la recompensa de Tetris nunca se pisa con un
+  // power-up pendiente; el power-up espera a la siguiente pieza si hace falta.
+  if (rewardPending) {
+    next = makePiece(SINGLE);
+    rewardPending = false;
+  } else if (powerupPending) {
+    next = makePowerPiece();
+    powerupPending = false;
+  } else {
+    next = randomPiece();
+  }
   if (collide(current.shape, current.x, current.y)) {
     endGame();
   }
   drawNext();
+  updatePowerHUD();
 }
 
 function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  updatePowerHUD();
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
   if (!colorIndex || colorIndex === HOLE) return; // el agujero de la tuerca no se dibuja
-  const color = COLORS[colorIndex];
   context.globalAlpha = alpha ?? 1;
-  context.fillStyle = color;
+  context.fillStyle = cellColor(colorIndex);
   context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
   // highlight
   context.fillStyle = 'rgba(255,255,255,0.12)';
   context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
+  const glyph = cellGlyph(colorIndex);
+  if (glyph) {
+    context.fillStyle = 'rgba(0,0,0,0.75)';
+    context.font = `${Math.floor(size * 0.55)}px sans-serif`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(glyph, x * size + size / 2, y * size + size / 2 + 1);
+  }
   context.globalAlpha = 1;
 }
 
@@ -272,6 +495,8 @@ function drawNext() {
 function endGame() {
   if (gameOver) return;
   gameOver = true;
+  freezeRemaining = 0;
+  powerStatus = '';
   cancelAnimationFrame(animId);
   animId = null;
   overlayTitle.textContent = 'GAME OVER';
@@ -303,13 +528,21 @@ function loop(ts) {
   }
   const dt = ts - lastTime;
   lastTime = ts;
-  dropAccum += dt;
-  if (dropAccum >= dropInterval) {
+  if (freezeRemaining > 0) {
+    // Congelar: la caída automática no avanza, pero ← → ↓ y Space (el
+    // keydown listener) siguen funcionando con normalidad.
+    freezeRemaining = Math.max(0, freezeRemaining - dt);
     dropAccum = 0;
-    if (!collide(current.shape, current.x, current.y + 1)) {
-      current.y++;
-    } else {
-      lockPiece();
+    updatePowerHUD();
+  } else {
+    dropAccum += dt;
+    if (dropAccum >= dropInterval) {
+      dropAccum = 0;
+      if (!collide(current.shape, current.x, current.y + 1)) {
+        current.y++;
+      } else {
+        lockPiece();
+      }
     }
   }
   draw();
@@ -328,6 +561,10 @@ function init() {
   paused = false;
   gameOver = false;
   rewardPending = false;
+  powerupPending = false;
+  nextPowerUpAtLines = POWERUP_LINE_INTERVAL;
+  freezeRemaining = 0;
+  powerStatus = '';
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();

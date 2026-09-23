@@ -24,6 +24,8 @@
   --restart-hover: #9bbdff;
   --toggle-bg: #1a1a25;
   --toggle-border: #2a2a3a;
+  --powerup-color: #80deea;
+  --powerup-status-color: #888;
 }
 
 body.light {
@@ -46,6 +48,8 @@ body.light {
   --restart-hover: #5a7ce0;
   --toggle-bg: #ffffff;
   --toggle-border: #c6c6d6;
+  --powerup-color: #0288a3;
+  --powerup-status-color: #6a6a80;
 }
 
 body {
@@ -144,6 +148,20 @@ body {
   border: 1px solid var(--board-border);
   background: var(--board-bg);
   border-radius: 4px;
+}
+
+/* ---- Power-up ---- */
+.powerup-value {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--powerup-color);
+}
+
+.powerup-status {
+  font-size: 11px;
+  color: var(--powerup-status-color);
+  min-height: 14px;
 }
 
 /* ---- Controles ---- */

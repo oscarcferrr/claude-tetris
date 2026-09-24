@@ -38,7 +38,18 @@ const POWER_BASE = 100;  // celdas de power-up: POWER_BASE + índice en POWERUPS
 
 // índice = tipo de pieza; peso 0 = nunca sale por sorteo (ej. SINGLE, sólo como recompensa)
 const PIECE_WEIGHTS = [0, 10, 10, 10, 10, 10, 10, 10, 6, 7, 7, 7, 0];
-const TOTAL_WEIGHT = PIECE_WEIGHTS.reduce((a, b) => a + b, 0);
+
+// ---- Modos de juego ----
+// Cada modo define de qué lista de tipos sortea randomType() y si las
+// mecánicas de power-ups/recompensa SINGLE están activas. Los pesos siguen
+// viniendo de PIECE_WEIGHTS (una sola fuente de verdad); el modo sólo filtra
+// qué índices entran en el sorteo.
+const CLASSIC_TYPES = [1, 2, 3, 4, 5, 6, 7]; // I,O,T,S,Z,J,L
+const GAME_MODES = {
+  classic:      { label: 'Clásico',             types: CLASSIC_TYPES,                          powerups: false, rewards: false },
+  classicPower: { label: 'Clásico + Power-ups', types: CLASSIC_TYPES,                          powerups: true,  rewards: false },
+  extended:     { label: 'Extendido',           types: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],    powerups: true,  rewards: true },
+};
 
 const PIECES = [
   null,
@@ -96,8 +107,15 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
+const modeMenuEl = document.getElementById('mode-menu');
+const modeLabelEl = document.getElementById('mode-label');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, rewardPending;
+// Modo de juego activo (clave de GAME_MODES). Se fija al elegir modo en el
+// menú inicial/Game Over y NO se resetea en init(): "Reiniciar" repite el
+// mismo modo con el que se venía jugando.
+let gameMode = 'extended';
+function modeCfg() { return GAME_MODES[gameMode]; }
 // Estado de power-ups (todo se resetea en init())
 let powerupPending;     // hay un power-up esperando a entrar en `next`
 let nextPowerUpAtLines; // umbral de líneas al que se encola el siguiente power-up
@@ -115,13 +133,17 @@ function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
 }
 
-function randomType() {
-  let r = Math.random() * TOTAL_WEIGHT;
-  for (let t = 1; t < PIECE_WEIGHTS.length; t++) {
+// Sorteo ponderado restringido a `types` (por defecto, la lista del modo de
+// juego activo). Suma los pesos de esos tipos y va restando hasta caer por
+// debajo de 0; así el modo Clásico nunca puede sacar NUT/PLUS/PENTO_*.
+function randomType(types = modeCfg().types) {
+  const total = types.reduce((sum, t) => sum + PIECE_WEIGHTS[t], 0);
+  let r = Math.random() * total;
+  for (const t of types) {
     r -= PIECE_WEIGHTS[t];
     if (r < 0) return t;
   }
-  return 1;
+  return types[0];
 }
 
 function makePiece(type) {
@@ -138,8 +160,7 @@ function randomPiece() {
 // Sortea un tetromino base (tipos 1–7, sin mezclar con NUT/pentominós) y le
 // incrusta una celda de power-up en un bloque relleno al azar.
 function makePowerPiece() {
-  let type;
-  do { type = randomType(); } while (type < 1 || type > 7);
+  const type = randomType(CLASSIC_TYPES); // siempre un tetromino clásico, en cualquier modo
   const piece = makePiece(type);
   const kind = Math.floor(Math.random() * POWERUPS.length);
   const filled = [];
@@ -269,6 +290,11 @@ function resolveWildContacts(lockedCells) {
 
 function updatePowerHUD() {
   if (!powerupNextEl) return; // panel aún no montado (no debería pasar)
+  if (!modeCfg().powerups) {
+    powerupNextEl.textContent = 'OFF';
+    powerupStatusEl.textContent = '';
+    return;
+  }
   const upcoming = next && next.power !== undefined ? POWERUPS[next.power] : null;
   powerupNextEl.textContent = upcoming ? `${upcoming.glyph} ${upcoming.label}` : '—';
   powerupStatusEl.textContent = freezeRemaining > 0
@@ -387,12 +413,15 @@ function resolveLock(cleared, spin) {
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
     if (level > prevLevel) GameEvents.emit('levelUp', { level });
-    if (cleared >= 4) rewardPending = true;
-    // Al cruzar cada múltiplo de POWERUP_LINE_INTERVAL se encola un power-up.
-    // `while` cubre el caso de que `cleared` salte de golpe varios umbrales.
+    // La recompensa SINGLE tras un Tetris sólo existe en modos con figuras extra.
+    if (cleared >= 4 && modeCfg().rewards) rewardPending = true;
+    // Al cruzar cada múltiplo de POWERUP_LINE_INTERVAL se encola un power-up
+    // (sólo en los modos que los tienen activados). `while` cubre el caso de
+    // que `cleared` salte de golpe varios umbrales; el umbral avanza siempre
+    // para no acumular power-ups pendientes si el modo cambia a mitad de partida.
     while (lines >= nextPowerUpAtLines) {
       nextPowerUpAtLines += POWERUP_LINE_INTERVAL;
-      if (Math.random() < POWERUP_CHANCE) powerupPending = true;
+      if (modeCfg().powerups && Math.random() < POWERUP_CHANCE) powerupPending = true;
     }
   }
 
@@ -550,6 +579,7 @@ function draw() {
 function drawNext() {
   const NB = 30;
   nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+  if (!next) return; // aún no se eligió modo / no hay partida en curso
   const shape = next.shape;
   let minR = shape.length, maxR = -1, minC = shape[0].length, maxC = -1;
   for (let r = 0; r < shape.length; r++)
@@ -567,6 +597,31 @@ function drawNext() {
       drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
 }
 
+// Muestra el overlay con el menú de modos. `withRestart` añade el botón
+// "Reiniciar" (Game Over); en el estado de reposo inicial no hay partida que
+// reiniciar, así que se oculta.
+function showModeMenu(title, scoreText, withRestart) {
+  overlayTitle.textContent = title;
+  overlayScore.textContent = scoreText || '';
+  modeMenuEl.classList.remove('hidden');
+  restartBtn.classList.toggle('hidden', !withRestart);
+  overlay.classList.remove('hidden');
+}
+
+function hideModeMenu() {
+  modeMenuEl.classList.add('hidden');
+  overlay.classList.add('hidden');
+}
+
+// Fija el modo elegido y arranca (o reinicia) la partida con él.
+function startGame(mode) {
+  if (!GAME_MODES[mode]) return;
+  gameMode = mode;
+  modeLabelEl.textContent = GAME_MODES[mode].label;
+  hideModeMenu();
+  init();
+}
+
 function endGame() {
   if (gameOver) return;
   gameOver = true;
@@ -576,9 +631,7 @@ function endGame() {
   b2bChain = 0;
   cancelAnimationFrame(animId);
   animId = null;
-  overlayTitle.textContent = 'GAME OVER';
-  overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
-  overlay.classList.remove('hidden');
+  showModeMenu('GAME OVER', `Puntuación: ${score.toLocaleString()}`, true);
   GameEvents.emit('gameOver', { score });
 }
 
@@ -595,6 +648,7 @@ function togglePause() {
     animId = null;
     overlayTitle.textContent = 'PAUSA';
     overlayScore.textContent = '';
+    modeMenuEl.classList.add('hidden'); // en pausa no se puede cambiar de modo
     overlay.classList.remove('hidden');
   }
 }
@@ -653,12 +707,21 @@ function init() {
   next = randomPiece();
   spawn();
   updateHUD();
-  overlay.classList.add('hidden');
+  hideModeMenu();
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
 }
 
+// Teclas 1/2/3 (también en el teclado numérico) eligen modo mientras el menú
+// de selección está visible, tanto en el arranque como en Game Over.
+const MODE_KEYS = { Digit1: 'classic', Digit2: 'classicPower', Digit3: 'extended',
+                    Numpad1: 'classic', Numpad2: 'classicPower', Numpad3: 'extended' };
+
 document.addEventListener('keydown', e => {
+  if (!modeMenuEl.classList.contains('hidden') && MODE_KEYS[e.code]) {
+    startGame(MODE_KEYS[e.code]);
+    return;
+  }
   if (e.code === 'KeyP') { togglePause(); return; }
   if (paused || gameOver) return;
   switch (e.code) {
@@ -685,7 +748,13 @@ document.addEventListener('keydown', e => {
   updateHUD();
 });
 
-restartBtn.addEventListener('click', init);
+restartBtn.addEventListener('click', () => startGame(gameMode)); // repite el modo actual
+
+// Delegado: un click en cualquier botón de modo dentro de #mode-menu arranca esa partida.
+modeMenuEl.addEventListener('click', e => {
+  const btn = e.target.closest('[data-mode]');
+  if (btn) startGame(btn.dataset.mode);
+});
 
 function toggleTheme() {
   const isLight = document.body.classList.toggle('light');
@@ -698,4 +767,11 @@ function toggleTheme() {
 
 themeToggleBtn.addEventListener('click', toggleTheme);
 
-init();
+// Estado de reposo antes de la primera partida: tablero vacío dibujado detrás
+// del menú de modos, sin pieza en juego (gameOver=true hace que draw()/el
+// listener de teclado no la esperen). No se llama a init() hasta elegir modo.
+board = createBoard();
+gameOver = true;
+next = null;
+draw();
+showModeMenu('TETRIS', '', false);

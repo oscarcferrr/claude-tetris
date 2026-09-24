@@ -22,6 +22,9 @@
   --restart-bg: #7aa2f7;
   --restart-color: #0f0f17;
   --restart-hover: #9bbdff;
+  --mode-btn-bg: #22223a;
+  --mode-btn-color: #e0e0e0;
+  --mode-btn-hover: #33335a;
   --toggle-bg: #1a1a25;
   --toggle-border: #2a2a3a;
   --powerup-color: #80deea;
@@ -54,6 +57,9 @@ body.light {
   --restart-bg: #3f5fc4;
   --restart-color: #ffffff;
   --restart-hover: #5a7ce0;
+  --mode-btn-bg: #e4e4f0;
+  --mode-btn-color: #23232e;
+  --mode-btn-hover: #d0d0e4;
   --toggle-bg: #ffffff;
   --toggle-border: #c6c6d6;
   --powerup-color: #0288a3;
@@ -314,4 +320,43 @@ kbd {
 
 #restart-btn:hover {
   background: var(--restart-hover);
+}
+
+/* Utilidad genérica para ocultar elementos sin tocar su `display` propio
+   (usada por #restart-btn y #mode-menu, además de .overlay.hidden). */
+.hidden {
+  display: none !important;
+}
+
+/* ---- Menú de selección de modo de juego ---- */
+.mode-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.mode-btn {
+  background: var(--mode-btn-bg);
+  color: var(--mode-btn-color);
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: background 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.mode-btn:hover {
+  background: var(--mode-btn-hover);
+}
+
+.mode-value {
+  font-size: 12px;
 }

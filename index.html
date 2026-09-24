@@ -18,6 +18,10 @@
 
       <aside class="panel">
         <div class="panel-section">
+          <span class="label">MODE</span>
+          <span class="value mode-value" id="mode-label">—</span>
+        </div>
+        <div class="panel-section">
           <span class="label">SCORE</span>
           <span class="value" id="score">0</span>
         </div>
@@ -68,7 +72,12 @@
       <div class="overlay-box">
         <p id="overlay-title">GAME OVER</p>
         <p id="overlay-score"></p>
-        <button id="restart-btn">Reiniciar</button>
+        <div id="mode-menu" class="mode-menu hidden">
+          <button type="button" class="mode-btn" data-mode="classic"><kbd>1</kbd> Clásico</button>
+          <button type="button" class="mode-btn" data-mode="classicPower"><kbd>2</kbd> Clásico + Power-ups</button>
+          <button type="button" class="mode-btn" data-mode="extended"><kbd>3</kbd> Extendido</button>
+        </div>
+        <button id="restart-btn" class="hidden">Reiniciar</button>
       </div>
     </div>
   </div>

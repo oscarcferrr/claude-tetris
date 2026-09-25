@@ -109,6 +109,7 @@ const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
 const modeMenuEl = document.getElementById('mode-menu');
 const modeLabelEl = document.getElementById('mode-label');
+const skinSelectEl = document.getElementById('skin-select');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, rewardPending;
 // Modo de juego activo (clave de GAME_MODES). Se fija al elegir modo en el
@@ -175,10 +176,13 @@ function makePowerPiece() {
 
 // Color de dibujo de una celda del tablero o de una pieza, incluyendo los
 // códigos especiales (power-up en vuelo, comodín). drawBlock() delega aquí.
+// La paleta base sale de la skin activa (skins.js); si la skin no define esa
+// entrada, cae a COLORS (paleta "retro") por robustez.
 function cellColor(v) {
   if (v >= POWER_BASE) return POWERUPS[v - POWER_BASE].color;
-  if (v === WILD) return WILD_COLOR;
-  return COLORS[v];
+  if (v === WILD) return getSkin().wildColor || WILD_COLOR;
+  const skin = getSkin();
+  return (skin.colors && skin.colors[v] !== undefined) ? skin.colors[v] : COLORS[v];
 }
 
 // Glifo a superponer sobre una celda especial, o null si no lleva ninguno.
@@ -515,11 +519,10 @@ function updateHUD() {
 function drawBlock(context, x, y, colorIndex, size, alpha) {
   if (!colorIndex || colorIndex === HOLE) return; // el agujero de la tuerca no se dibuja
   context.globalAlpha = alpha ?? 1;
-  context.fillStyle = cellColor(colorIndex);
-  context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
-  // highlight
-  context.fillStyle = 'rgba(255,255,255,0.12)';
-  context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
+  // El cuerpo del bloque (relleno, highlight/glow/bisel según la skin) lo
+  // pinta la skin activa; drawBlock() sólo resuelve el color y añade encima
+  // el glifo, que es común a todas las skins (ver cabecera de skins.js).
+  getSkin().drawCell(context, x * size, y * size, size, cellColor(colorIndex), alpha ?? 1);
   const glyph = cellGlyph(colorIndex);
   if (glyph) {
     context.fillStyle = 'rgba(0,0,0,0.75)';
@@ -718,6 +721,9 @@ const MODE_KEYS = { Digit1: 'classic', Digit2: 'classicPower', Digit3: 'extended
                     Numpad1: 'classic', Numpad2: 'classicPower', Numpad3: 'extended' };
 
 document.addEventListener('keydown', e => {
+  // Si el foco está en un control de formulario (p.ej. el <select> de skin),
+  // las flechas/teclas del juego no deben interferir con su interacción.
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (!modeMenuEl.classList.contains('hidden') && MODE_KEYS[e.code]) {
     startGame(MODE_KEYS[e.code]);
     return;
@@ -766,6 +772,32 @@ function toggleTheme() {
 }
 
 themeToggleBtn.addEventListener('click', toggleTheme);
+
+// Cambio de skin: se resuelve aquí (no en skins.js) porque game.js ya es el
+// dueño del wiring de todos los controles del panel (tema, modo, reinicio).
+// Igual que toggleTheme(), repinta sin recargar; blur() evita que el foco se
+// quede en el <select> e intercepte las flechas del teclado del juego.
+if (skinSelectEl) {
+  // Opciones generadas desde SKINS (skins.js) en vez de duplicarlas en el
+  // HTML: así añadir/renombrar una skin sólo requiere tocar skins.js.
+  for (const [id, skin] of Object.entries(SKINS)) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = skin.label;
+    skinSelectEl.appendChild(opt);
+  }
+  skinSelectEl.addEventListener('change', e => {
+    setSkin(e.target.value);
+    draw();
+    drawNext();
+    e.target.blur();
+  });
+}
+
+// Carga la skin guardada (o 'retro' por defecto) ANTES del primer draw() para
+// que se aplique desde el primer frame, y sincroniza el <select> con ella.
+loadSkin();
+if (skinSelectEl) skinSelectEl.value = getSkinId();
 
 // Estado de reposo antes de la primera partida: tablero vacío dibujado detrás
 // del menú de modos, sin pieza en juego (gameOver=true hace que draw()/el

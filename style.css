@@ -360,3 +360,48 @@ kbd {
 .mode-value {
   font-size: 12px;
 }
+
+/* ---- Selector de skin ---- */
+#skin-select {
+  background: var(--kbd-bg);
+  color: var(--value-color);
+  border: 1px solid var(--kbd-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+#skin-select:hover,
+#skin-select:focus {
+  border-color: var(--title-color);
+}
+
+/* ---- Skins: fondo de tablero/rejilla por tema visual ----
+   La skin "neón" necesita fondo oscuro para que el glow se lea, incluso con
+   el tema claro activo. body.skin-neon y body.light tienen la misma
+   especificidad (una clase cada uno); al declararse DESPUÉS de body.light en
+   este archivo, body.skin-neon ya gana la cascada para --board-bg/--grid-color
+   aunque <body> tenga también la clase "light" — por eso no hace falta una
+   regla compuesta body.light.skin-neon aparte (sería una segunda fuente de
+   verdad con los mismos valores). Si esta regla se mueve antes de body.light,
+   hay que añadir esa variante compuesta para no perder el efecto.
+   Pastel SÍ necesita una variante compuesta porque sus valores cambian entre
+   temas (paleta desaturada distinta en claro/oscuro). Pixel art no toca el
+   fondo: su identidad viene de la textura de cada bloque, no del tablero. */
+body.skin-neon {
+  --board-bg: #000000;
+  --grid-color: #14141c;
+}
+
+body.skin-pastel {
+  --board-bg: #221f2b;
+  --grid-color: #322f3d;
+}
+
+body.light.skin-pastel {
+  --board-bg: #fff8fb;
+  --grid-color: #f3e5f5;
+}

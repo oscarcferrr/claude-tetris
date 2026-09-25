@@ -109,8 +109,16 @@ const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
 const modeMenuEl = document.getElementById('mode-menu');
 const modeLabelEl = document.getElementById('mode-label');
+const recordsPanelEl = document.getElementById('records-panel');
+const recordsTableEl = document.getElementById('records-table');
+const recordsBestsEl = document.getElementById('records-bests');
+const recordEntryEl = document.getElementById('record-entry');
+const recordNameInput = document.getElementById('record-name');
+const recordSaveBtn = document.getElementById('record-save');
+const recordsResetBtn = document.getElementById('records-reset');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, rewardPending;
+let maxCombo; // combo más alto alcanzado en la partida actual (para la tabla de récords)
 // Modo de juego activo (clave de GAME_MODES). Se fija al elegir modo en el
 // menú inicial/Game Over y NO se resetea en init(): "Reiniciar" repite el
 // mismo modo con el que se venía jugando.
@@ -405,6 +413,7 @@ function resolveLock(cleared, spin) {
 
   score += result.points;
   combo = result.combo;
+  maxCombo = Math.max(maxCombo, combo); // registrado para Records.updateBests() al terminar la partida
   b2bChain = result.b2b;
 
   if (cleared) {
@@ -610,8 +619,86 @@ function showModeMenu(title, scoreText, withRestart) {
 
 function hideModeMenu() {
   modeMenuEl.classList.add('hidden');
+  hideRecordsPanel();
   overlay.classList.add('hidden');
 }
+
+/* ================= Tabla de récords ================= */
+
+// Escapa texto antes de inyectarlo como HTML (el nombre del jugador viene de
+// localStorage/un <input>, así que nunca se debe insertar tal cual).
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Redibuja la tabla de top 5 y la línea de mejores marcas globales.
+// `highlightIdx` (índice en Records.load(), o -1) marca la fila recién
+// insertada con la clase .record-new.
+function renderRecordsTable(highlightIdx) {
+  const records = Records.load();
+  const { bestCombo, maxLines } = Records.bests();
+  if (records.length === 0) {
+    recordsTableEl.innerHTML = '<li class="records-empty">Sin récords todavía</li>';
+  } else {
+    recordsTableEl.innerHTML = records.map((r, i) => `
+      <li class="${i === highlightIdx ? 'record-new' : ''}">
+        <span class="record-pos">${i + 1}</span>
+        <span class="record-name">${escapeHtml(r.name)}</span>
+        <span class="record-score">${r.score.toLocaleString()}</span>
+      </li>
+    `).join('');
+  }
+  recordsBestsEl.textContent = `Mejor combo: x${bestCombo}  ·  Máx. líneas: ${maxLines}`;
+}
+
+// Muestra el panel de récords (pantalla de inicio o Game Over). `canQualify`
+// controla si se ofrece el formulario de nombre (sólo cuando la puntuación
+// actual entra en el top 5).
+function showRecordsPanel(canQualify) {
+  recordsPanelEl.classList.remove('hidden');
+  if (canQualify) {
+    let lastName = '';
+    try { lastName = localStorage.getItem('tetris.lastName') || ''; } catch { /* noop */ }
+    recordNameInput.value = lastName;
+    recordEntryEl.classList.remove('hidden');
+    renderRecordsTable(-1);
+    recordNameInput.focus();
+  } else {
+    recordEntryEl.classList.add('hidden');
+    renderRecordsTable(-1);
+  }
+}
+
+function hideRecordsPanel() {
+  recordsPanelEl.classList.add('hidden');
+}
+
+// Guarda el récord de la partida que acaba de terminar con el nombre escrito
+// en #record-name (botón "Guardar" o Enter en el input).
+function saveRecord() {
+  const name = (recordNameInput.value || '').trim().slice(0, 12) || 'AAA';
+  try { localStorage.setItem('tetris.lastName', name); } catch { /* noop */ }
+  const idx = Records.add({ name, score, lines, maxCombo, level, mode: gameMode });
+  recordEntryEl.classList.add('hidden');
+  renderRecordsTable(idx);
+}
+
+recordSaveBtn.addEventListener('click', saveRecord);
+recordNameInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    saveRecord();
+  }
+});
+
+recordsResetBtn.addEventListener('click', () => {
+  if (confirm('¿Borrar todos los récords?')) {
+    Records.reset();
+    renderRecordsTable(-1);
+  }
+});
 
 // Fija el modo elegido y arranca (o reinicia) la partida con él.
 function startGame(mode) {
@@ -627,11 +714,13 @@ function endGame() {
   gameOver = true;
   freezeRemaining = 0;
   powerStatus = '';
+  Records.updateBests({ maxCombo, lines });
   combo = 0;
   b2bChain = 0;
   cancelAnimationFrame(animId);
   animId = null;
   showModeMenu('GAME OVER', `Puntuación: ${score.toLocaleString()}`, true);
+  showRecordsPanel(Records.qualifies(score));
   GameEvents.emit('gameOver', { score });
 }
 
@@ -649,6 +738,7 @@ function togglePause() {
     overlayTitle.textContent = 'PAUSA';
     overlayScore.textContent = '';
     modeMenuEl.classList.add('hidden'); // en pausa no se puede cambiar de modo
+    hideRecordsPanel(); // ni ver/editar la tabla de récords
     overlay.classList.remove('hidden');
   }
 }
@@ -698,6 +788,7 @@ function init() {
   freezeRemaining = 0;
   powerStatus = '';
   combo = 0;
+  maxCombo = 0;
   b2bChain = 0;
   lastAction = 'spawn';
   lastKick = 0;
@@ -718,6 +809,9 @@ const MODE_KEYS = { Digit1: 'classic', Digit2: 'classicPower', Digit3: 'extended
                     Numpad1: 'classic', Numpad2: 'classicPower', Numpad3: 'extended' };
 
 document.addEventListener('keydown', e => {
+  // Escribir en un campo (p.ej. el nombre del récord) nunca debe disparar
+  // acciones del juego (mover, pausar, elegir modo, hard-drop...).
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
   if (!modeMenuEl.classList.contains('hidden') && MODE_KEYS[e.code]) {
     startGame(MODE_KEYS[e.code]);
     return;
@@ -775,3 +869,4 @@ gameOver = true;
 next = null;
 draw();
 showModeMenu('TETRIS', '', false);
+showRecordsPanel(false); // pantalla de inicio: tabla + mejores marcas, sin formulario

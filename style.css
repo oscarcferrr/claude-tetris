@@ -328,8 +328,9 @@ kbd {
   display: none !important;
 }
 
-/* ---- Menú de selección de modo de juego ---- */
-.mode-menu {
+/* ---- Menú de selección de modo de juego / menú de pausa ---- */
+.mode-menu,
+.pause-menu {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -359,4 +360,54 @@ kbd {
 
 .mode-value {
   font-size: 12px;
+}
+
+/* ---- Menú de pausa: selector de nivel inicial y lista de controles ---- */
+.pause-level {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 2px;
+}
+
+.pause-level label {
+  font-size: 12px;
+  color: var(--label-color);
+  letter-spacing: 0.5px;
+}
+
+#start-level {
+  background: var(--kbd-bg);
+  color: var(--text);
+  border: 1px solid var(--kbd-border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pause-controls {
+  width: 100%;
+  text-align: left;
+  background: var(--mode-btn-bg);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+
+.pause-controls ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pause-controls li {
+  font-size: 12px;
+  color: var(--controls-color);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }

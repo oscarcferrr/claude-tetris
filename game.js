@@ -109,13 +109,35 @@ const restartBtn = document.getElementById('restart-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
 const modeMenuEl = document.getElementById('mode-menu');
 const modeLabelEl = document.getElementById('mode-label');
+const pauseMenuEl = document.getElementById('pause-menu');
+const pauseControlsEl = document.getElementById('pause-controls');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, rewardPending;
 // Modo de juego activo (clave de GAME_MODES). Se fija al elegir modo en el
 // menú inicial/Game Over y NO se resetea en init(): "Reiniciar" repite el
 // mismo modo con el que se venía jugando.
 let gameMode = 'extended';
+// Nivel inicial elegido en el menú de pausa (selector #start-level, ver
+// pause.js). Igual que gameMode, NO se resetea en init(): "Reiniciar" repite
+// el nivel con el que se venía jugando, no siempre el 1.
+let startLevel = 1;
+// Copia de `startLevel` tomada al arrancar la partida actual (init()). Si el
+// jugador cambia el selector de nivel inicial DURANTE una pausa y luego
+// pulsa "Reanudar" (en vez de "Reiniciar"), la partida en curso debe seguir
+// con el nivel que tenía — el cambio sólo se aplica a la siguiente partida.
+// resolveLock() calcula el nivel a partir de ÉSTA, nunca de `startLevel`.
+let runStartLevel = 1;
+// Ventana de gracia tras reanudar (performance.now() hasta el que se ignoran
+// las teclas de juego), para que un Space/flecha "en el aire" al cerrar el
+// menú de pausa no dispare un movimiento o caída accidental.
+let inputLockUntil = 0;
 function modeCfg() { return GAME_MODES[gameMode]; }
+// Fórmula del intervalo de caída automática según el nivel; centralizada
+// aquí porque tanto init() (nivel inicial) como resolveLock() (progresión
+// por líneas) la necesitan y deben quedar en sincronía.
+function dropIntervalFor(lvl) {
+  return Math.max(100, 1000 - (lvl - 1) * 90);
+}
 // Estado de power-ups (todo se resetea en init())
 let powerupPending;     // hay un power-up esperando a entrar en `next`
 let nextPowerUpAtLines; // umbral de líneas al que se encola el siguiente power-up
@@ -410,8 +432,8 @@ function resolveLock(cleared, spin) {
   if (cleared) {
     lines += cleared;
     const prevLevel = level;
-    level = Math.floor(lines / 10) + 1;
-    dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    level = runStartLevel + Math.floor(lines / 10);
+    dropInterval = dropIntervalFor(level);
     if (level > prevLevel) GameEvents.emit('levelUp', { level });
     // La recompensa SINGLE tras un Tetris sólo existe en modos con figuras extra.
     if (cleared >= 4 && modeCfg().rewards) rewardPending = true;
@@ -605,6 +627,10 @@ function showModeMenu(title, scoreText, withRestart) {
   overlayScore.textContent = scoreText || '';
   modeMenuEl.classList.remove('hidden');
   restartBtn.classList.toggle('hidden', !withRestart);
+  // El overlay es compartido con el menú de pausa: al mostrar el menú de
+  // modo/Game Over hay que asegurarse de que el de pausa no quede debajo.
+  pauseMenuEl.classList.add('hidden');
+  pauseControlsEl.classList.add('hidden');
   overlay.classList.remove('hidden');
 }
 
@@ -643,13 +669,25 @@ function togglePause() {
     dropAccum = 0;
     if (animId === null) animId = requestAnimationFrame(loop);
     overlay.classList.add('hidden');
+    pauseMenuEl.classList.add('hidden');
+    pauseControlsEl.classList.add('hidden');
+    // Ventana de gracia: ignora teclas de juego los próximos 150ms para que
+    // un Space/flecha que estaba "en el aire" al cerrar el menú no dispare
+    // un movimiento o una caída accidental nada más reanudar.
+    inputLockUntil = performance.now() + 150;
   } else {
     cancelAnimationFrame(animId);
     animId = null;
     overlayTitle.textContent = 'PAUSA';
     overlayScore.textContent = '';
     modeMenuEl.classList.add('hidden'); // en pausa no se puede cambiar de modo
+    restartBtn.classList.add('hidden');
+    pauseControlsEl.classList.add('hidden');
+    pauseMenuEl.classList.remove('hidden');
     overlay.classList.remove('hidden');
+    // Avisa a pause.js (si está cargado) de que el menú se acaba de abrir,
+    // para que sincronice el selector de nivel inicial con `startLevel`.
+    document.dispatchEvent(new CustomEvent('pausemenu:open'));
   }
 }
 
@@ -689,7 +727,8 @@ function init() {
   board = createBoard();
   score = 0;
   lines = 0;
-  level = 1;
+  runStartLevel = startLevel; // fija el nivel inicial de ESTA partida
+  level = runStartLevel;
   paused = false;
   gameOver = false;
   rewardPending = false;
@@ -701,7 +740,7 @@ function init() {
   b2bChain = 0;
   lastAction = 'spawn';
   lastKick = 0;
-  dropInterval = 1000;
+  dropInterval = dropIntervalFor(runStartLevel);
   dropAccum = 0;
   lastTime = performance.now();
   next = randomPiece();
@@ -722,8 +761,14 @@ document.addEventListener('keydown', e => {
     startGame(MODE_KEYS[e.code]);
     return;
   }
-  if (e.code === 'KeyP') { togglePause(); return; }
+  if (e.code === 'KeyP' || e.code === 'Escape') { togglePause(); return; }
   if (paused || gameOver) return;
+  if (performance.now() < inputLockUntil) {
+    // Ventana de gracia tras reanudar: ignora la tecla, pero si es Space
+    // igual hay que evitar el scroll de página por defecto del navegador.
+    if (e.code === 'Space') e.preventDefault();
+    return;
+  }
   switch (e.code) {
     case 'ArrowLeft':
       if (!collide(current.shape, current.x - 1, current.y)) { current.x--; lastAction = 'move'; }

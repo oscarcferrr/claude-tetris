@@ -37,6 +37,14 @@
   --fx-perfect-color: #81c784;
   --fx-points-color: #7aa2f7;
   --fx-text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  --records-border: #2a2a3a;
+  --records-pos-color: #555570;
+  --records-name-color: #e0e0e0;
+  --records-score-color: #7aa2f7;
+  --records-bests-color: #888;
+  --records-reset-color: #e57373;
+  --record-new-bg: rgba(255, 202, 40, 0.18);
+  --record-new-color: #ffca28;
 }
 
 body.light {
@@ -72,6 +80,14 @@ body.light {
   --fx-perfect-color: #388e3c;
   --fx-points-color: #3f5fc4;
   --fx-text-shadow: 0 2px 6px rgba(255, 255, 255, 0.7);
+  --records-border: #c6c6d6;
+  --records-pos-color: #6a6a80;
+  --records-name-color: #23232e;
+  --records-score-color: #3f5fc4;
+  --records-bests-color: #55556a;
+  --records-reset-color: #c0392b;
+  --record-new-bg: rgba(245, 127, 23, 0.16);
+  --record-new-color: #f57f17;
 }
 
 body {
@@ -359,4 +375,137 @@ kbd {
 
 .mode-value {
   font-size: 12px;
+}
+
+/* ---- Tabla de récords ---- */
+.records-panel {
+  /* Ancho fijo (no 100%) para que el overlay-box (sin ancho propio, se ajusta
+     al contenido) tenga una base estable con la que encajar el resto de filas
+     dentro del canvas de 300px sin desbordar. */
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-top: 1px solid var(--records-border);
+  border-bottom: 1px solid var(--records-border);
+}
+
+.records-title {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--label-color);
+  font-weight: 700;
+  text-align: center;
+}
+
+.records-table {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 130px;
+  overflow-y: auto;
+}
+
+.records-table li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.records-table .records-empty {
+  justify-content: center;
+  color: var(--records-bests-color);
+  font-family: inherit;
+}
+
+.record-pos {
+  color: var(--records-pos-color);
+  width: 14px;
+}
+
+.record-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--records-name-color);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-score {
+  color: var(--records-score-color);
+  font-weight: 700;
+}
+
+.records-table li.record-new {
+  background: var(--record-new-bg);
+  color: var(--record-new-color);
+}
+
+.records-table li.record-new .record-name,
+.records-table li.record-new .record-score,
+.records-table li.record-new .record-pos {
+  color: var(--record-new-color);
+}
+
+.records-bests {
+  font-size: 11px;
+  color: var(--records-bests-color);
+  text-align: center;
+}
+
+.record-entry {
+  display: flex;
+  gap: 6px;
+}
+
+.record-entry input {
+  flex: 1;
+  min-width: 0;
+  background: var(--kbd-bg);
+  border: 1px solid var(--kbd-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.record-entry button {
+  background: var(--restart-bg);
+  color: var(--restart-color);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.record-entry button:hover {
+  background: var(--restart-hover);
+}
+
+.records-reset-btn {
+  align-self: center;
+  background: none;
+  border: 1px solid var(--records-reset-color);
+  color: var(--records-reset-color);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.records-reset-btn:hover {
+  background: var(--records-reset-color);
+  color: #fff;
 }

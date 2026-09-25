@@ -72,6 +72,18 @@
       <div class="overlay-box">
         <p id="overlay-title">GAME OVER</p>
         <p id="overlay-score"></p>
+
+        <div id="records-panel" class="records-panel hidden">
+          <p class="records-title">TOP 5</p>
+          <ol id="records-table" class="records-table"></ol>
+          <p id="records-bests" class="records-bests"></p>
+          <div id="record-entry" class="record-entry hidden">
+            <input id="record-name" type="text" maxlength="12" placeholder="Nombre" autocomplete="off" />
+            <button id="record-save" type="button">Guardar</button>
+          </div>
+          <button id="records-reset" type="button" class="records-reset-btn">Resetear récords</button>
+        </div>
+
         <div id="mode-menu" class="mode-menu hidden">
           <button type="button" class="mode-btn" data-mode="classic"><kbd>1</kbd> Clásico</button>
           <button type="button" class="mode-btn" data-mode="classicPower"><kbd>2</kbd> Clásico + Power-ups</button>
@@ -82,6 +94,7 @@
     </div>
   </div>
 
+  <script src="records.js"></script>
   <script src="scoring.js"></script>
   <script src="effects.js"></script>
   <script src="game.js"></script>
